@@ -587,7 +587,8 @@
 
     // Iniciar verificação imediatamente
     setTimeout(() => {
-        document.getElementById('login-status').innerText = "Servidor conectado. Verificando acesso...";
+        const statusEl = document.getElementById('login-status');
+        if(statusEl) statusEl.innerText = "Servidor conectado. Verificando acesso...";
         checkLogin();
     }, 1000);
 
@@ -595,7 +596,8 @@
         const localToken = localStorage.getItem('mc_user_token');
         if(!localToken) {
             document.getElementById('login-modal').style.display = 'flex';
-            document.getElementById('login-status').innerText = "";
+            const statusEl = document.getElementById('login-status');
+            if(statusEl) statusEl.innerText = "";
             return;
         }
 
@@ -615,14 +617,16 @@
                 updateHeaderProfile();
                 loadUserContent();
                 document.getElementById('login-modal').style.display = 'none';
+                init();
             } else {
                 localStorage.removeItem('mc_user_token');
                 document.getElementById('login-modal').style.display = 'flex';
             }
         } catch(e) {
             console.error(e);
-            alert("Erro de conexão com o banco de dados. Verifique sua internet ou se o projeto Firebase foi criado corretamente.");
-            document.getElementById('login-status').innerText = "Erro de conexão.";
+            alert("Erro de conexão. Verifique se as Regras do Firestore estão públicas (Modo de Teste).");
+            const statusEl = document.getElementById('login-status');
+            if(statusEl) statusEl.innerText = "Erro de conexão.";
         }
     }
 
@@ -677,7 +681,6 @@
         btn.innerText = "Criando conta..."; btn.disabled = true;
 
         try {
-            // Verifica se nome existe
             const check = await db.collection("users").where("name", "==", nameInput).get();
             
             if(!check.empty) {
@@ -687,10 +690,9 @@
                     return;
                 }
                 btn.innerText = "Entrar no App"; btn.disabled = false;
-                return alert("Este nome de usuário já existe e pertence a outro dispositivo. Escolha outro.");
+                return alert("Este nome de usuário já existe.");
             }
 
-            // Cria novo
             const token = Math.random().toString(36).substr(2) + Date.now().toString(36);
             const newUser = {
                 name: nameInput,
@@ -712,7 +714,7 @@
 
         } catch(e) {
             console.error(e);
-            alert("Erro ao criar conta online. Verifique se o Banco de Dados Firestore foi criado no console do Firebase.");
+            alert("Erro ao criar conta. Verifique as Regras de Segurança no Console.");
             btn.innerText = "Entrar no App"; btn.disabled = false;
         }
     }
@@ -816,21 +818,20 @@
     }
     
     function logout() { 
-        if(!confirm("Tem certeza que deseja sair deste dispositivo?")) return; 
+        if(!confirm("Tem certeza que deseja sair?")) return; 
         currentUser = null; 
         localStorage.removeItem('mc_user_token'); 
         location.reload(); 
     }
 
     async function deleteAccount() {
-        if(!confirm("ATENÇÃO: Isso apagará sua conta permanentemente.\nSeu perfil ficará invisível em 2 minutos.")) return;
+        if(!confirm("ATENÇÃO: Exclusão permanente.")) return;
         
         try {
             await db.collection("users").doc(currentUser.id).update({
                 deletedAt: Date.now(),
                 token: null
             });
-            alert("Conta agendada para exclusão. Tchau!");
             localStorage.removeItem('mc_user_token');
             location.reload();
         } catch(e) { alert("Erro ao excluir."); }
@@ -847,7 +848,6 @@
         
         try {
             const snapshot = await db.collection("users").limit(20).get();
-            
             list.innerHTML = '';
             
             snapshot.forEach(doc => {
@@ -855,71 +855,49 @@
                 if(u.id === currentUser.id) return;
                 if(!u.name.toLowerCase().includes(queryStr.toLowerCase())) return;
 
-                let isDeleted = false;
-                if(u.deletedAt) {
-                    const timeDiff = Date.now() - u.deletedAt;
-                    if(timeDiff > 120000) return; 
-                    isDeleted = true;
-                }
+                let isDeleted = u.deletedAt && (Date.now() - u.deletedAt < 120000);
+                if(u.deletedAt && !isDeleted) return;
 
                 const row = document.createElement('div'); 
                 row.className = 'user-row' + (isDeleted ? ' deleted' : '');
                 
-                let avatarHtml = '';
-                if(u.photo) {
-                    avatarHtml = `<div class="user-avatar" style="background-image:url(${u.photo}); background-color:transparent;"></div>`;
-                } else {
-                    avatarHtml = `<div class="user-avatar" style="background:${u.color||'var(--primary)'}">${u.avatar}</div>`;
-                }
+                let avatarHtml = u.photo ? 
+                    `<div class="user-avatar" style="background-image:url(${u.photo}); background-color:transparent;"></div>` :
+                    `<div class="user-avatar" style="background:${u.color||'var(--primary)'}">${u.avatar}</div>`;
                 
                 row.innerHTML = `${avatarHtml}<span>${u.name}</span>`; 
-                if(!isDeleted) {
-                    row.onclick = () => openProfile(u); 
-                }
+                if(!isDeleted) row.onclick = () => openProfile(u); 
                 list.appendChild(row); 
             });
             
-            if(list.innerHTML === '') list.innerHTML = '<div style="padding:10px;">Ninguém encontrado.</div>';
-
-        } catch(e) { console.error(e); list.innerHTML = 'Erro ao buscar.'; }
+            if(list.innerHTML === '') list.innerHTML = '<div>Ninguém encontrado.</div>';
+        } catch(e) { list.innerHTML = 'Erro.'; }
     }
     
     async function openProfile(user) {
         if(currentUser && user.id === currentUser.id) return openMyProfile();
-        
         document.getElementById('user-search-modal').style.display = 'none'; 
-        const mod = document.getElementById('profile-modal'); 
-        mod.style.display = 'flex';
-        
+        document.getElementById('profile-modal').style.display = 'flex';
         document.getElementById('prof-name').innerText = user.name;
         updateAvatarDisplay('prof-avatar', user);
         document.getElementById('prof-bio').innerText = user.bio || "Sem biografia.";
         
-        const fGrid = document.getElementById('prof-folders'); fGrid.innerHTML = 'Carregando...';
-        const sGrid = document.getElementById('prof-songs'); sGrid.innerHTML = 'Carregando...';
+        const fGrid = document.getElementById('prof-folders'); fGrid.innerHTML = '...';
+        const sGrid = document.getElementById('prof-songs'); sGrid.innerHTML = '...';
 
         try {
-            const fSnap = await db.collection("folders")
-                .where("userId", "==", user.id)
-                .where("public", "==", true).get();
-            
+            const fSnap = await db.collection("folders").where("userId", "==", user.id).where("public", "==", true).get();
             fGrid.innerHTML = '';
-            if(fSnap.empty) fGrid.innerHTML = '<div style="color:var(--text-sec)">Nenhuma pasta pública.</div>';
             fSnap.forEach(d => { fGrid.appendChild(createFolderCard({id: d.id, ...d.data()}, false)); });
 
-            const sSnap = await db.collection("songs")
-                .where("userId", "==", user.id)
-                .where("public", "==", true).get();
-
+            const sSnap = await db.collection("songs").where("userId", "==", user.id).where("public", "==", true).get();
             sGrid.innerHTML = '';
-            if(sSnap.empty) sGrid.innerHTML = '<div style="color:var(--text-sec)">Nenhuma música pública.</div>';
             sSnap.forEach(d => { 
                 const s = d.data();
                 const el = document.createElement('div'); el.className = 'card-item'; el.innerText = s.title; 
                 el.onclick = () => openUserSong({id: d.id, ...s}); sGrid.appendChild(el); 
             });
-
-        } catch(e) { console.error(e); }
+        } catch(e) {}
     }
     
     function openUserSong(song) {
@@ -929,12 +907,8 @@
         document.getElementById('seq-content-mine').style.display = 'none'; 
         document.getElementById('seq-content-comm').style.display = 'none'; 
         document.getElementById('seq-list').style.display = 'block';
-        
         document.getElementById('folder-title-disp').innerText = song.title; 
         document.getElementById('folder-desc-disp').innerText = "Música de Usuário"; 
-        document.getElementById('folder-actions').style.display = 'none'; 
-        document.getElementById('folder-empty-msg').style.display = 'none';
-        
         const c = document.getElementById('seq-rows'); 
         c.innerHTML = ''; 
         renderSongRow(c, song, true);
@@ -942,8 +916,6 @@
     
     let state = { inst: 'violao', root: 'C', type: '', varIdx: 0, chords: [] };
     let history = ['lib']; let histPtr = 0;
-    
-    window.onload = () => { init(); };
     
     function init() {
         if(localStorage.getItem('theme') === 'dark') toggleTheme(false);
@@ -954,7 +926,6 @@
         updateLangUI(); initLab(); updateLibrary(); renderGenres(); renderAllChordsGrid(); updateHistoryUI(); 
     }
     
-    // ... [KEEPING ORIGINAL CHORD LOGIC INTACT] ...
     function handleSearch(val) { val = val.trim(); if(!val) return; const regex = /^([A-G][#b]?)(.*)$/i; const match = val.match(regex); if(match) { let rootInput = match[1].toUpperCase(); if(rootInput.length > 1) rootInput = rootInput.charAt(0) + rootInput.charAt(1).toLowerCase(); if (!ROOTS.includes(rootInput)) { const flatMap = {'Db':'C#', 'Eb':'D#', 'Gb':'F#', 'Ab':'G#', 'Bb':'A#'}; if(flatMap[rootInput]) rootInput = flatMap[rootInput]; } let typeInput = match[2].trim().toLowerCase(); if(ROOTS.includes(rootInput)) { state.root = rootInput; document.querySelectorAll('#col-root .scroll-item').forEach(b => { b.classList.toggle('active', b.innerText === rootInput); }); } const typeObj = TYPES.find(t => t.id.toLowerCase() === typeInput || t.n.toLowerCase() === typeInput); if(typeObj) { state.type = typeObj.id; } else if (typeInput === "") { state.type = ""; } document.querySelectorAll('#col-type .scroll-item').forEach(b => { b.classList.toggle('active', b.dataset.tid === state.type); }); state.varIdx = 0; updateLibrary(); } }
     const ROOT_VALS = { 'C':0, 'C#':1, 'D':2, 'D#':3, 'E':4, 'F':5, 'F#':6, 'G':7, 'G#':8, 'A':9, 'A#':10, 'B':11 };
     function getChordData(root, type, inst) { const shapesDB = inst === 'violao' ? GUITAR_SHAPES : UKE_SHAPES; const baseShapes = shapesDB[type] || shapesDB['']; const targetVal = ROOT_VALS[root]; let result = []; let seen = new Set(); baseShapes.forEach(template => { let dist = targetVal - template.o; if(dist < 0) dist += 12; let newShape = template.s.map(f => { if(f === -1) return 'X'; if(typeof f === 'function') return f(dist); return f + dist; }); const nums = newShape.filter(x => typeof x === 'number'); if(nums.length > 0) { const minF = Math.min(...nums); if(minF > 11) { let shifted = newShape.map(f => typeof f === 'number' ? f - 12 : f); if(!shifted.some(f => typeof f === 'number' && f < 0)) newShape = shifted; } } let cObj = { n: [], x: [] }; newShape.forEach((val, i) => { if(val === 'X') cObj.x.push(i); else cObj.n.push([i, val]); }); const nums2 = newShape.filter(x => typeof x === 'number'); const minF2 = Math.min(...nums2); if(minF2 > 0) { const count = nums2.filter(n => n === minF2).length; if(count >= 2) { let played = newShape.map((v,i)=>v!=='X'?i:-1).filter(i=>i!==-1); let hasOpen = newShape.some(v => v === 0); if(!hasOpen) cObj.bar = { fret: minF2, from: Math.min(...played), to: Math.max(...played) }; } } const sig = JSON.stringify(newShape); if(!seen.has(sig)) { seen.add(sig); result.push(cObj); } }); result.sort((a,b) => { let minA = Math.min(...a.n.map(n=>n[1])); let minB = Math.min(...b.n.map(n=>n[1])); return minA - minB; }); return result; }
@@ -997,76 +968,50 @@
     
     function openMyFolder(folder, isMine) { activeFolderId = folder.id; document.getElementById('seq-content-mine').style.display = 'none'; document.getElementById('seq-content-comm').style.display = 'none'; document.getElementById('seq-list').style.display = 'block'; document.getElementById('folder-title-disp').innerText = folder.name; document.getElementById('folder-desc-disp').innerText = folder.desc || ""; const actions = document.getElementById('folder-actions'); actions.style.display = isMine ? 'flex' : 'none'; const songs = userSongs.filter(s => s.folderId === folder.id); const c = document.getElementById('seq-rows'); c.innerHTML = ''; if(songs.length === 0) { document.getElementById('folder-empty-msg').style.display = 'block'; } else { document.getElementById('folder-empty-msg').style.display = 'none'; songs.forEach(s => renderSongRow(c, s, true, 0, isMine)); } }
     
-    // --- FUNÇÕES DE DELETAR REAIS ---
     async function deleteCurrentFolder() {
         if (!activeFolderId) return;
-        if (!confirm("Tem certeza? Isso apagará a pasta e TODAS as músicas que estão dentro dela permanentemente.")) return;
-
+        if (!confirm("Tem certeza?")) return;
         try {
             const songsToDelete = userSongs.filter(s => s.folderId === activeFolderId);
             const batch = db.batch();
-
-            songsToDelete.forEach(s => {
-                const ref = db.collection("songs").doc(s.id);
-                batch.delete(ref);
-            });
-
-            const folderRef = db.collection("folders").doc(activeFolderId);
-            batch.delete(folderRef);
-
+            songsToDelete.forEach(s => { batch.delete(db.collection("songs").doc(s.id)); });
+            batch.delete(db.collection("folders").doc(activeFolderId));
             await batch.commit();
-
             userFolders = userFolders.filter(f => f.id !== activeFolderId);
             userSongs = userSongs.filter(s => s.folderId !== activeFolderId);
-
-            alert("Pasta apagada com sucesso!");
-            closeSeqList();
-            renderMyFolders();
-
-        } catch (e) {
-            console.error(e);
-            alert("Erro ao apagar pasta: " + e.message);
-        }
+            closeSeqList(); renderMyFolders();
+        } catch (e) { alert("Erro."); }
     }
 
     async function deleteSingleSong(songId) {
-        if (!confirm("Tem certeza que deseja excluir esta música?")) return;
-
+        if (!confirm("Excluir música?")) return;
         try {
             await db.collection("songs").doc(songId).delete();
             userSongs = userSongs.filter(s => s.id !== songId);
-
             const folder = userFolders.find(f => f.id === activeFolderId);
-            if (folder) {
-                openMyFolder(folder, true);
-            }
-            
-        } catch (e) {
-            console.error(e);
-            alert("Erro ao excluir música: " + e.message);
-        }
+            if (folder) openMyFolder(folder, true);
+        } catch (e) { alert("Erro."); }
     }
     
     async function searchCommunitySongs(q) { 
-        const c = document.getElementById('comm-list'); c.innerHTML = 'Carregando...'; 
+        const c = document.getElementById('comm-list'); c.innerHTML = '...'; 
         try {
             const snap = await db.collection("songs").where("public", "==", true).limit(20).get();
             c.innerHTML = '';
-            if(snap.empty) c.innerHTML = '<div style="color:var(--text-sec)">Nada encontrado...</div>';
             snap.forEach(d => {
                 const s = {id: d.id, ...d.data()};
                 if(s.title.toLowerCase().includes(q.toLowerCase())) {
                     const el = document.createElement('div'); el.className = 'card-item'; el.innerText = s.title; el.onclick = () => openUserSong(s); c.appendChild(el);
                 }
             });
-        } catch(e) { c.innerHTML = 'Erro na busca.'; }
+        } catch(e) {}
     }
     
-    function renderSongRow(container, song, isDynamic, idx=0, showActions=false) { const r = document.createElement('div'); r.className = 'song-row'; let auth = song.author ? ` <small>(${song.author})</small>` : ''; let acts = ''; if(showActions) { acts = `<div class="song-actions-row"><button class="icon-btn-small" onclick="editSong('${song.id}')">✏️</button><button class="icon-btn-small" style="color:var(--danger)" onclick="deleteSingleSong('${song.id}')">🗑</button></div>`; } let h = `<div class="song-header"><span>${song.title}${auth}</span>${acts}</div><div class="song-chords-scroll">`; song.chords.forEach((chord, ci) => { const id = `s-${isDynamic?'dyn':'st'}-${song.id||idx}-${ci}-${Math.random().toString(36).substr(2,5)}`; h += `<div class="chord-thumb" onclick="openModal('${chord}')"><span>${chord}</span><canvas id="${id}" width="80" height="100"></canvas></div>`; setTimeout(() => { const root = chord.match(/^[A-G][#b]?/)[0]; const type = chord.substring(root.length); let tid = ''; const tObj = TYPES.find(t=>t.id===type||t.n===type); if(tObj) tid = tObj.id; const cData = getChordData(root, tid, state.inst)[0]; drawChord(id, cData, state.inst, false); }, 50); }); h += `</div>`; r.innerHTML = h; container.appendChild(r); }
+    function renderSongRow(container, song, isDynamic, idx=0, showActions=false) { const r = document.createElement('div'); r.className = 'song-row'; let auth = song.author ? ` <small>(${song.author})</small>` : ''; let acts = ''; if(showActions) { acts = `<div class="song-actions-row"><button class="icon-btn-small" onclick="editSong('${song.id}')">✏️</button><button class="icon-btn-small" style="color:var(--danger)" onclick="deleteSingleSong('${song.id}')">🗑</button></div>`; } let h = `<div class="song-header"><span>${song.title}${auth}</span>${acts}</div><div class="song-chords-scroll">`; song.chords.forEach((chord, ci) => { const id = `s-${isDynamic?'dyn':'st'}-${song.id||idx}-${ci}-${Math.random().toString(36).substr(2,5)}`; h += `<div class="chord-thumb" onclick="openModal('${chord}')"><span>${chord}</span><canvas id="${id}" width="80" height="100"></canvas></div>`; setTimeout(() => { const match = chord.match(/^[A-G][#b]?/); if(!match) return; const root = match[0]; const type = chord.substring(root.length); let tid = ''; const tObj = TYPES.find(t=>t.id===type||t.n===type); if(tObj) tid = tObj.id; const cData = getChordData(root, tid, state.inst)[0]; drawChord(id, cData, state.inst, false); }, 50); }); h += `</div>`; r.innerHTML = h; container.appendChild(r); }
     function closeSeqList() { document.getElementById('seq-list').style.display = 'none'; const activeTab = document.querySelector('.sub-tab-btn.active').id; if(activeTab === 'st-gen') document.getElementById('seq-genres').style.display = 'grid'; if(activeTab === 'st-mine') document.getElementById('seq-content-mine').style.display = 'block'; if(activeTab === 'st-comm') document.getElementById('seq-content-comm').style.display = 'block'; activeFolderId = null; }
     
     let builderChords = []; let editingSongId = null;
-    function openSongBuilder() { builderChords = []; editingSongId = null; document.getElementById('builder-title').value = ''; document.getElementById('builder-seq').innerHTML = '<span style="color:var(--text-sec); width:100%; text-align:center; padding-top:20px;">Adicione acordes da lista ao lado.</span>'; document.getElementById('builder-modal').style.display = 'flex'; renderBuilderPool(); }
+    function openSongBuilder() { builderChords = []; editingSongId = null; document.getElementById('builder-title').value = ''; document.getElementById('builder-seq').innerHTML = '<span style="color:var(--text-sec); width:100%; text-align:center; padding-top:20px;">Vazio.</span>'; document.getElementById('builder-modal').style.display = 'flex'; renderBuilderPool(); }
     function editSong(songId) { const song = userSongs.find(s => s.id === songId); if(!song) return; editingSongId = songId; builderChords = [...song.chords]; document.getElementById('builder-title').value = song.title; document.getElementById('builder-public').checked = song.public; document.getElementById('builder-modal').style.display = 'flex'; renderBuilderPool(); renderBuilderSeq(); }
     function closeSongBuilder() { document.getElementById('builder-modal').style.display = 'none'; }
     function filterBuilderChords(val) { renderBuilderPool(val); }
@@ -1074,35 +1019,73 @@
     function previewChordForBuilder(name) { openModal(name); document.getElementById('modal-play-btn').style.display = 'none'; document.getElementById('modal-lib-btn').style.display = 'none'; document.getElementById('modal-add-btn').style.display = 'flex'; }
     function addChordFromModal() { if(builderChords.length === 0) document.getElementById('builder-seq').innerHTML = ''; builderChords.push(modName); renderBuilderSeq(); closeModal(); }
     function addChordToBuilder(name) { if(builderChords.length === 0) document.getElementById('builder-seq').innerHTML = ''; builderChords.push(name); renderBuilderSeq(); }
-    function removeChordFromBuilder(idx) { builderChords.splice(idx, 1); renderBuilderSeq(); if(builderChords.length === 0) document.getElementById('builder-seq').innerHTML = '<span style="color:var(--text-sec); width:100%; text-align:center; padding-top:20px;">Adicione acordes...</span>'; }
+    function removeChordFromBuilder(idx) { builderChords.splice(idx, 1); renderBuilderSeq(); if(builderChords.length === 0) document.getElementById('builder-seq').innerHTML = '<span>...</span>'; }
     let dragSrcEl = null; let dragSrcIndex = -1;
-    function renderBuilderSeq() { const seq = document.getElementById('builder-seq'); seq.innerHTML = ''; builderChords.forEach((chord, i) => { const div = document.createElement('div'); div.className = 'chord-thumb'; const cid = `bld-s-${i}-${Math.random()}`; div.innerHTML = `<span>${chord}</span><canvas id="${cid}" width="80" height="100"></canvas><button class="rem-btn-mini" onclick="removeChordFromBuilder(${i})">-</button>`; div.addEventListener('mousedown', (e) => handleDragStart(e, i, div)); div.addEventListener('touchstart', (e) => handleDragStart(e, i, div), {passive: false}); seq.appendChild(div); setTimeout(() => { const root = chord.match(/^[A-G][#b]?/)[0]; const type = chord.substring(root.length); let tid = ''; const tObj = TYPES.find(t=>t.id===type||t.n===type); if(tObj) tid = tObj.id; const cData = getChordData(root, tid, state.inst)[0]; drawChord(cid, cData, state.inst, false); }, 0); }); }
+    function renderBuilderSeq() { const seq = document.getElementById('builder-seq'); seq.innerHTML = ''; builderChords.forEach((chord, i) => { const div = document.createElement('div'); div.className = 'chord-thumb'; const cid = `bld-s-${i}-${Math.random()}`; div.innerHTML = `<span>${chord}</span><canvas id="${cid}" width="80" height="100"></canvas><button class="rem-btn-mini" onclick="removeChordFromBuilder(${i})">-</button>`; div.addEventListener('mousedown', (e) => handleDragStart(e, i, div)); div.addEventListener('touchstart', (e) => handleDragStart(e, i, div), {passive: false}); seq.appendChild(div); setTimeout(() => { const match = chord.match(/^[A-G][#b]?/); if(!match) return; const root = match[0]; const type = chord.substring(root.length); let tid = ''; const tObj = TYPES.find(t=>t.id===type||t.n===type); if(tObj) tid = tObj.id; const cData = getChordData(root, tid, state.inst)[0]; drawChord(cid, cData, state.inst, false); }, 0); }); }
     function handleDragStart(e, index, el) { if(e.target.tagName === 'BUTTON') return; e.preventDefault(); dragSrcIndex = index; const seqContainer = document.getElementById('builder-seq'); const clone = el.cloneNode(true); clone.classList.add('dragging'); clone.style.width = el.offsetWidth + 'px'; document.body.appendChild(clone); el.classList.add('placeholder'); const moveHandler = (em) => { let cx = em.clientX || em.touches[0].clientX; let cy = em.clientY || em.touches[0].clientY; clone.style.left = (cx - clone.offsetWidth/2) + 'px'; clone.style.top = (cy - clone.offsetHeight/2) + 'px'; }; const endHandler = (em) => { document.removeEventListener('mousemove', moveHandler); document.removeEventListener('mouseup', endHandler); document.removeEventListener('touchmove', moveHandler); document.removeEventListener('touchend', endHandler); let cx = em.clientX || (em.changedTouches ? em.changedTouches[0].clientX : 0); let cy = em.clientY || (em.changedTouches ? em.changedTouches[0].clientY : 0); clone.remove(); el.classList.remove('placeholder'); const siblings = [...seqContainer.children]; let targetIndex = -1; siblings.forEach((sib, idx) => { const rect = sib.getBoundingClientRect(); if(cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom) { targetIndex = idx; } }); if(targetIndex !== -1 && targetIndex !== dragSrcIndex) { const movedItem = builderChords.splice(dragSrcIndex, 1)[0]; builderChords.splice(targetIndex, 0, movedItem); renderBuilderSeq(); } }; document.addEventListener('mousemove', moveHandler); document.addEventListener('mouseup', endHandler); document.addEventListener('touchmove', moveHandler, {passive: false}); document.addEventListener('touchend', endHandler); let startX = e.clientX || e.touches[0].clientX; let startY = e.clientY || e.touches[0].clientY; clone.style.left = (startX - clone.offsetWidth/2) + 'px'; clone.style.top = (startY - clone.offsetHeight/2) + 'px'; }
     
     async function saveBuiltSong() { 
-        const title = document.getElementById('builder-title').value || "Sem Título"; const isPub = document.getElementById('builder-public').checked; if(builderChords.length === 0) return alert("Adicione pelo menos um acorde!"); 
+        const title = document.getElementById('builder-title').value || "Sem Título"; 
+        const isPub = document.getElementById('builder-public').checked; 
+        if(builderChords.length === 0) return alert("Adicione acordes!"); 
         
         try {
             if(editingSongId) {
-                alert("Edição não implementada completamente nesta versão.");
+                await db.collection("songs").doc(editingSongId).update({
+                    title: title, chords: [...builderChords], public: isPub
+                });
+                // Atualizar localmente
+                const sIdx = userSongs.findIndex(s => s.id === editingSongId);
+                if(sIdx !== -1) { userSongs[sIdx].title = title; userSongs[sIdx].chords = [...builderChords]; userSongs[sIdx].public = isPub; }
             } else {
-                const newSong = { folderId: activeFolderId, userId: currentUser.id, title: title, chords: [...builderChords], public: isPub, author: currentUser.name, createdAt: Date.now() };
+                const newSong = { 
+                    folderId: activeFolderId || "geral", // GARANTIA PARA NÃO DAR ERRO
+                    userId: currentUser.id, title: title, chords: [...builderChords], 
+                    public: isPub, author: currentUser.name, createdAt: Date.now() 
+                };
                 const ref = await db.collection("songs").add(newSong);
                 userSongs.push({id: ref.id, ...newSong});
-                closeSongBuilder();
+            }
+            closeSongBuilder();
+            if(activeFolderId) {
                 const folder = userFolders.find(f => f.id === activeFolderId);
                 openMyFolder(folder, true);
+            } else {
+                setSeqTab('mine');
             }
-        } catch(e) { alert("Erro ao salvar música."); }
+        } catch(e) { alert("Erro ao salvar."); }
     }
     
     let modData = [], modIdx = 0, modName = "";
-    function openModal(name) { const root = name.match(/^[A-G][#b]?/)[0]; const type = name.substring(root.length); let tid = ''; const tObj = TYPES.find(t=>t.id===type||t.n===type); if(tObj) tid = tObj.id; modName = name; modData = getChordData(root, tid, state.inst); modIdx = 0; document.getElementById('modal-title').innerText = name; document.getElementById('modal').style.display = 'flex'; document.getElementById('modal-play-btn').style.display = 'flex'; document.getElementById('modal-lib-btn').style.display = 'block'; document.getElementById('modal-add-btn').style.display = 'none'; drawModal(); }
+    function openModal(name) { 
+        const match = name.match(/^[A-G][#b]?/);
+        if(!match) return;
+        const root = match[0];
+        const type = name.substring(root.length); 
+        let tid = ''; const tObj = TYPES.find(t=>t.id===type||t.n===type); if(tObj) tid = tObj.id; 
+        modName = name; modData = getChordData(root, tid, state.inst); modIdx = 0; 
+        document.getElementById('modal-title').innerText = name; 
+        document.getElementById('modal').style.display = 'flex'; 
+        document.getElementById('modal-play-btn').style.display = 'flex'; 
+        document.getElementById('modal-lib-btn').style.display = 'block'; 
+        document.getElementById('modal-add-btn').style.display = 'none'; 
+        drawModal(); 
+    }
     function drawModal() { const txt = TEXTS[CUR_LANG]; document.getElementById('modal-counter').innerText = `${txt.var} ${modIdx+1} ${txt.of} ${modData.length}`; drawChord('modal-canvas', modData[modIdx], state.inst, true); }
     function modalNav(d) { modIdx = (modIdx + d + modData.length) % modData.length; drawModal(); }
     function closeModal() { document.getElementById('modal').style.display = 'none'; }
     document.getElementById('modal').onclick = function(e) { if(e.target === this) closeModal(); }
-    function goToLibFromModal() { closeModal(); userNav('lib'); const root = modName.match(/^[A-G][#b]?/)[0]; const type = modName.substring(root.length); let tid = ''; const tObj = TYPES.find(t=>t.id===type||t.n===type); if(tObj) tid = tObj.id; const rBtn = [...document.querySelectorAll('#col-root .scroll-item')].find(b=>b.innerText===root); const tBtn = [...document.querySelectorAll('#col-type .scroll-item')].find(b=>b.dataset.tid===tid); if(rBtn) rBtn.click(); if(tBtn) tBtn.click(); }
+    function goToLibFromModal() { 
+        closeModal(); userNav('lib'); 
+        const match = modName.match(/^[A-G][#b]?/);
+        if(!match) return;
+        const root = match[0];
+        const type = modName.substring(root.length); 
+        let tid = ''; const tObj = TYPES.find(t=>t.id===type||t.n===type); if(tObj) tid = tObj.id; 
+        const rBtn = [...document.querySelectorAll('#col-root .scroll-item')].find(b=>b.innerText===root); 
+        const tBtn = [...document.querySelectorAll('#col-type .scroll-item')].find(b=>b.dataset.tid===tid); 
+        if(rBtn) rBtn.click(); if(tBtn) tBtn.click(); 
+    }
     
     let audioCtx = null; const TUNINGS = { violao: [82,110,147,196,247,330], ukulele: [392,261,329,440] };
     function playChordStruct(notes) { if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); const now = audioCtx.currentTime; const freqs = TUNINGS[state.inst]; notes.sort((a,b)=>a.s-b.s); notes.forEach((n, i) => { const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain(); osc.type = 'triangle'; osc.frequency.value = freqs[n.s] * Math.pow(2, n.f/12); const t = now + i*0.04; gain.gain.setValueAtTime(0, t); gain.gain.linearRampToValueAtTime(0.4, t+0.05); gain.gain.exponentialRampToValueAtTime(0.001, t+2.0); osc.connect(gain); gain.connect(audioCtx.destination); osc.start(t); osc.stop(t+2.5); }); }
@@ -1114,18 +1097,18 @@
     let labSt = []; const NOTES_SCALE = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const INTERVALS = { '0,4,7':'', '0,3,7':'m', '0,4,7,10':'7', '0,4,7,11':'maj7', '0,3,7,10':'m7', '0,3,6':'dim', '0,4,8':'aug', '0,2,7':'sus2', '0,5,7':'sus4', '0,4,7,9':'6', '0,3,7,9':'m6', '0,4,7,14':'add9' }; const TUNING_PITCHES = { violao: [4,9,2,7,11,4], ukulele: [7,0,4,9] };
     function initLab() { labSt = new Array(state.inst==='violao'?6:4).fill(0); drawLab(); updateProbables(); identLab(); }
     function resetLab() { initLab(); }
-    function drawLab() { const cvs = document.getElementById('lab-canvas'); const ctx = cvs.getContext('2d'); const w=cvs.width, h=cvs.height, sC=labSt.length; const st = getComputedStyle(document.body); ctx.clearRect(0,0,w,h); const cFr=st.getPropertyValue('--fret').trim(); const cStr=st.getPropertyValue('--string').trim(); const cNut=st.getPropertyValue('--nut').trim(); const cDot=st.getPropertyValue('--primary').trim(); const cDang=st.getPropertyValue('--danger').trim(); const mX=40, mY=30, fG=(w-mX*2)/12, sG=(h-mY*2)/(sC-1); ctx.strokeStyle=cFr; ctx.lineWidth=2; for(let i=1;i<=12;i++) { let x=mX+i*fG; ctx.beginPath(); ctx.moveTo(x,mY); ctx.lineTo(x,h-mY); ctx.stroke(); if([3,5,7,9,12].includes(i)){ctx.fillStyle=cFr;ctx.beginPath();ctx.arc(x-fG/2,h/2,4,0,Math.PI*2);ctx.fill();} ctx.fillStyle = cNut; ctx.font = "bold 14px sans-serif"; ctx.textAlign="center"; ctx.fillText(i, x - fG/2, h - 5); } ctx.strokeStyle=cNut; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(mX,mY); ctx.lineTo(mX,h-mY); ctx.stroke(); for(let i=0;i<sC;i++) { let y=h-mY-i*sG; ctx.strokeStyle=cStr; ctx.lineWidth=1+(sC-1-i)*0.4; ctx.beginPath(); ctx.moveTo(mX,y); ctx.lineTo(w-mX,y); ctx.stroke(); let v=labSt[i]; if(v===-1){ctx.fillStyle=cDang;ctx.font="bold 20px sans-serif";ctx.fillText("X",15,y+6);} else if(v===0){ctx.fillStyle=cStr;ctx.beginPath();ctx.arc(25,y,6,0,Math.PI*2);ctx.fill();} else{let x=mX+v*fG-fG/2;ctx.fillStyle=cDot;ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);ctx.fill();} } }
+    function drawLab() { const cvs = document.getElementById('lab-canvas'); if(!cvs) return; const ctx = cvs.getContext('2d'); const w=cvs.width, h=cvs.height, sC=labSt.length; const st = getComputedStyle(document.body); ctx.clearRect(0,0,w,h); const cFr=st.getPropertyValue('--fret').trim(); const cStr=st.getPropertyValue('--string').trim(); const cNut=st.getPropertyValue('--nut').trim(); const cDot=st.getPropertyValue('--primary').trim(); const cDang=st.getPropertyValue('--danger').trim(); const mX=40, mY=30, fG=(w-mX*2)/12, sG=(h-mY*2)/(sC-1); ctx.strokeStyle=cFr; ctx.lineWidth=2; for(let i=1;i<=12;i++) { let x=mX+i*fG; ctx.beginPath(); ctx.moveTo(x,mY); ctx.lineTo(x,h-mY); ctx.stroke(); if([3,5,7,9,12].includes(i)){ctx.fillStyle=cFr;ctx.beginPath();ctx.arc(x-fG/2,h/2,4,0,Math.PI*2);ctx.fill();} ctx.fillStyle = cNut; ctx.font = "bold 14px sans-serif"; ctx.textAlign="center"; ctx.fillText(i, x - fG/2, h - 5); } ctx.strokeStyle=cNut; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(mX,mY); ctx.lineTo(mX,h-mY); ctx.stroke(); for(let i=0;i<sC;i++) { let y=h-mY-i*sG; ctx.strokeStyle=cStr; ctx.lineWidth=1+(sC-1-i)*0.4; ctx.beginPath(); ctx.moveTo(mX,y); ctx.lineTo(w-mX,y); ctx.stroke(); let v=labSt[i]; if(v===-1){ctx.fillStyle=cDang;ctx.font="bold 20px sans-serif";ctx.fillText("X",15,y+6);} else if(v===0){ctx.fillStyle=cStr;ctx.beginPath();ctx.arc(25,y,6,0,Math.PI*2);ctx.fill();} else{let x=mX+v*fG-fG/2;ctx.fillStyle=cDot;ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);ctx.fill();} } }
     document.getElementById('lab-canvas').onclick = e => { const r=e.target.getBoundingClientRect(); const x=e.clientX-r.left, y=e.clientY-r.top; const sC=labSt.length, mY=30, mX=40; const h=e.target.height, w=e.target.width; const sG=(h-mY*2)/(sC-1), fG=(w-mX*2)/12; if(y > h - 30) { if(x > mX) { let f = Math.ceil((x-mX)/fG); if(f<=12) toggleBarre(f); } return; } let i=Math.round((h-mY-y)/sG); if(i<0||i>=sC)return; let f=x>=mX ? Math.ceil((x-mX)/fG) : 0; if(f>12)return; if(f===0) labSt[i] = labSt[i]===0?-1:0; else labSt[i] = labSt[i]===f?-1:f; drawLab(); updateProbables(); identLab(); };
     function toggleBarre(fret) { let count = labSt.filter(v => v === fret).length; let turnOn = count < labSt.length / 2; for(let i=0; i<labSt.length; i++) { if(turnOn) { if(labSt[i] <= 0 || labSt[i] < fret) labSt[i] = fret; } else { if(labSt[i] === fret) labSt[i] = 0; } } drawLab(); updateProbables(); identLab(); }
     function identLab() { const res = document.querySelector('.lab-result'); if(!res) return; const tun = TUNING_PITCHES[state.inst]; let notes = []; labSt.forEach((f, s) => { if(f !== -1) notes.push((tun[s] + f) % 12); }); if(notes.length === 0) { res.innerText = "--"; return; } let unique = [...new Set(notes)].sort((a,b)=>a-b); let found = null; for (let r of unique) { let intervals = unique.map(n => (n - r + 12) % 12).sort((a,b)=>a-b); let k = intervals.join(','); if (INTERVALS[k]) { found = NOTES_SCALE[r] + INTERVALS[k]; break; } } if (found) { res.innerText = found; res.style.color = "var(--success)"; } else { res.innerText = "?"; res.style.color = "var(--text-sec)"; } }
-    function updateProbables() { const list = document.getElementById('prob-list'); list.innerHTML = ''; let activeNotes = []; labSt.forEach((f, i) => { if(f > 0) activeNotes.push({s:i, f:f}); }); if(activeNotes.length === 0) { list.innerHTML = `<div style="padding:10px; opacity:0.6;">(Marque notas no braço para ver sugestões)</div>`; return; } let candidates = []; for(let r of ROOTS) { for(let t of TYPES) { const variants = getChordData(r, t.id, state.inst); for(let v of variants) { let vNotes = [...v.n]; if(v.bar) { for(let s=v.bar.from; s<=v.bar.to; s++) { if(!v.n.find(n=>n[0]===s)) vNotes.push([s, v.bar.fret]); } } let match = true; for(let uNote of activeNotes) { let found = vNotes.find(vn => vn[0] === uNote.s && vn[1] === uNote.f); if(!found) { match = false; break; } } if(match) { candidates.push({ name: r + t.n, data: v }); if(candidates.length > 15) break; } } } } if(candidates.length === 0) { list.innerHTML = `<div style="padding:10px; opacity:0.6;">Nenhum acorde encontrado.</div>`; } else { const unique = []; const seen = new Set(); candidates.forEach(c => { if(!seen.has(c.name)) { seen.add(c.name); unique.push(c); } }); unique.forEach((c, index) => { const uid = `prob-canvas-${index}`; const card = document.createElement('div'); card.className = 'prob-card'; card.innerHTML = `<span>${c.name}</span><canvas id="${uid}"></canvas>`; card.onclick = () => applyProbable(c.data); list.appendChild(card); drawChord(uid, c.data, state.inst, false); }); } }
-    function applyProbable(chordData) { labSt = new Array(state.inst==='violao'?6:4).fill(0); chordData.n.forEach(n => labSt[n[0]] = n[1]); if(chordData.bar) { for(let s=chordData.bar.from; s<=chordData.bar.to; s++) { if(labSt[s] === 0) labSt[s] = chordData.bar.fret; } } if(chordData.x) { chordData.x.forEach(s => labSt[s] = -1); } drawLab(); identLab(); }
+    function updateProbables() { const list = document.getElementById('prob-list'); list.innerHTML = ''; let activeNotes = []; labSt.forEach((f, i) => { if(f > 0) activeNotes.push({s:i, f:f}); }); if(activeNotes.length === 0) { list.innerHTML = `<div>...</div>`; return; } let candidates = []; for(let r of ROOTS) { for(let t of TYPES) { const variants = getChordData(r, t.id, state.inst); for(let v of variants) { let vNotes = [...v.n]; if(v.bar) { for(let s=v.bar.from; s<=v.bar.to; s++) { if(!v.n.find(n=>n[0]===s)) vNotes.push([s, v.bar.fret]); } } let match = true; for(let uNote of activeNotes) { let found = vNotes.find(vn => vn[0] === uNote.s && vn[1] === uNote.f); if(!found) { match = false; break; } } if(match) candidates.push({ name: r + t.n, data: v }); } } } if(candidates.length === 0) { list.innerHTML = `<div>Nenhum.</div>`; } else { const unique = []; const seen = new Set(); candidates.forEach(c => { if(!seen.has(c.name)) { seen.add(c.name); unique.push(c); } }); unique.forEach((c, index) => { const uid = `prob-canvas-${index}`; const card = document.createElement('div'); card.className = 'prob-card'; card.innerHTML = `<span>${c.name}</span><canvas id="${uid}"></canvas>`; card.onclick = () => applyProbable(c.data); list.appendChild(card); drawChord(uid, c.data, state.inst, false); }); } }
+    function applyProbable(chordData) { labSt = new Array(state.inst==='violao'?6:4).fill(0); chordData.n.forEach(n => labSt[n[0]] = n[1]); if(chordData.bar) { for(let s=chordData.bar.from; s<=chordData.bar.to; s++) { if(labSt[s] === 0) labSt[s] = chordData.bar.fret; } } if(chordData.x) chordData.x.forEach(s => labSt[s] = -1); drawLab(); identLab(); }
     
     let tunerCtx = null, tunerAnalyser = null, tunerSource = null, tunerStream = null, isTunerRunning = false, tunerRafId = null; const noteStrings = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    async function startTuner() { document.getElementById('btn-start-mic').style.display='none'; document.getElementById('btn-stop-mic').style.display='block'; document.getElementById('tuner-status').innerText = "Iniciando..."; try { tunerStream = await navigator.mediaDevices.getUserMedia({ audio: true }); tunerCtx = new (window.AudioContext || window.webkitAudioContext)(); tunerAnalyser = tunerCtx.createAnalyser(); tunerAnalyser.fftSize = 2048; tunerSource = tunerCtx.createMediaStreamSource(tunerStream); tunerSource.connect(tunerAnalyser); isTunerRunning = true; updatePitch(); } catch (err) { alert("Erro ao acessar microfone."); stopTuner(); } }
+    async function startTuner() { document.getElementById('btn-start-mic').style.display='none'; document.getElementById('btn-stop-mic').style.display='block'; document.getElementById('tuner-status').innerText = "Iniciando..."; try { tunerStream = await navigator.mediaDevices.getUserMedia({ audio: true }); tunerCtx = new (window.AudioContext || window.webkitAudioContext)(); tunerAnalyser = tunerCtx.createAnalyser(); tunerAnalyser.fftSize = 2048; tunerSource = tunerCtx.createMediaStreamSource(tunerStream); tunerSource.connect(tunerAnalyser); isTunerRunning = true; updatePitch(); } catch (err) { alert("Sem acesso ao MIC."); stopTuner(); } }
     function stopTuner() { isTunerRunning = false; if(tunerRafId) cancelAnimationFrame(tunerRafId); if(tunerStream) tunerStream.getTracks().forEach(track => track.stop()); if(tunerCtx) tunerCtx.close(); tunerStream = null; tunerCtx = null; document.getElementById('btn-start-mic').style.display='block'; document.getElementById('btn-stop-mic').style.display='none'; document.getElementById('tuner-needle-rot').style.transform = `rotate(0deg)`; document.getElementById('tuner-note').innerText = "--"; document.getElementById('tuner-freq').innerText = "0.0 Hz"; document.getElementById('tuner-status').innerText = TEXTS[CUR_LANG].tuner_wait; document.getElementById('tuner-status').className = "tuner-status-text"; }
     function autoCorrelate(buf, sampleRate) { let SIZE = buf.length; let rms = 0; for (let i=0;i<SIZE;i++) { let val = buf[i]; rms += val*val; } rms = Math.sqrt(rms/SIZE); if (rms<0.01) return -1; let r1=0, r2=SIZE-1, thres=0.2; for (let i=0; i<SIZE/2; i++) if (Math.abs(buf[i])<thres) { r1=i; break; } for (let i=1; i<SIZE/2; i++) if (Math.abs(buf[SIZE-i])<thres) { r2=SIZE-i; break; } buf = buf.slice(r1,r2); SIZE = buf.length; let c = new Array(SIZE).fill(0); for (let i=0; i<SIZE; i++) for (let j=0; j<SIZE-i; j++) c[i] = c[i] + buf[j]*buf[j+i]; let d=0; while (c[d]>c[d+1]) d++; let maxval=-1, maxpos=-1; for (let i=d; i<SIZE; i++) { if (c[i] > maxval) { maxval = c[i]; maxpos = i; } } let T0 = maxpos; let x1=c[T0-1], x2=c[T0], x3=c[T0+1]; let a = (x1 + x3 - 2*x2)/2; let b = (x3 - x1)/2; if (a) T0 = T0 - b/(2*a); return sampleRate/T0; }
-    function updatePitch() { if(!isTunerRunning) return; let buf = new Float32Array(tunerAnalyser.fftSize); tunerAnalyser.getFloatTimeDomainData(buf); let ac = autoCorrelate(buf, tunerCtx.sampleRate); const nDisp = document.getElementById('tuner-note'); const fDisp = document.getElementById('tuner-freq'); const nNeedle = document.getElementById('tuner-needle-rot'); const sDisp = document.getElementById('tuner-status'); if (ac === -1) { sDisp.innerText = TEXTS[CUR_LANG].tuner_wait; sDisp.className = "tuner-status-text"; } else { let note = 12 * (Math.log(ac / 440) / Math.log(2)) + 69; let noteRounded = Math.round(note); let noteIdx = noteRounded % 12; let cents = Math.floor((note - noteRounded) * 100); let nName = noteStrings[noteIdx]; nDisp.innerText = nName; fDisp.innerText = Math.round(ac) + " Hz"; let rot = cents * 0.9; if(rot < -90) rot = -90; if(rot > 90) rot = 90; nNeedle.style.transform = `rotate(${rot}deg)`; sDisp.className = "tuner-status-text"; if(Math.abs(cents) < 5) { sDisp.innerText = "PERFEITO!"; sDisp.classList.add("tuner-perfect"); } else if (cents < 0) { sDisp.innerText = "GRAVE (APERTE)"; sDisp.classList.add("tuner-flat"); } else { sDisp.innerText = "AGUDO (SOLTE)"; sDisp.classList.add("tuner-sharp"); } } tunerRafId = requestAnimationFrame(updatePitch); }
+    function updatePitch() { if(!isTunerRunning) return; let buf = new Float32Array(tunerAnalyser.fftSize); tunerAnalyser.getFloatTimeDomainData(buf); let ac = autoCorrelate(buf, tunerCtx.sampleRate); const nDisp = document.getElementById('tuner-note'); const fDisp = document.getElementById('tuner-freq'); const nNeedle = document.getElementById('tuner-needle-rot'); const sDisp = document.getElementById('tuner-status'); if (ac === -1) { sDisp.innerText = TEXTS[CUR_LANG].tuner_wait; sDisp.className = "tuner-status-text"; } else { let note = 12 * (Math.log(ac / 440) / Math.log(2)) + 69; let noteRounded = Math.round(note); let noteIdx = noteRounded % 12; let cents = Math.floor((note - noteRounded) * 100); let nName = noteStrings[noteIdx]; nDisp.innerText = nName; fDisp.innerText = Math.round(ac) + " Hz"; let rot = cents * 0.9; if(rot < -90) rot = -90; if(rot > 90) rot = 90; nNeedle.style.transform = `rotate(${rot}deg)`; sDisp.className = "tuner-status-text"; if(Math.abs(cents) < 5) { sDisp.innerText = "PERFEITO!"; sDisp.classList.add("tuner-perfect"); } else if (cents < 0) { sDisp.innerText = "GRAVE"; sDisp.classList.add("tuner-flat"); } else { sDisp.innerText = "AGUDO"; sDisp.classList.add("tuner-sharp"); } } tunerRafId = requestAnimationFrame(updatePitch); }
 </script>
 </body>
 </html>
